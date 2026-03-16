@@ -9,3 +9,9 @@ build/
 .env
 .venv/
 venv/
+test-docs/
+user-docs/
+m3-docs/
+deepdoc.yaml
+deepdoc-user.yaml
+scan_user.py
