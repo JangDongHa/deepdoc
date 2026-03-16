@@ -83,7 +83,30 @@ def generate(config: str, output: str | None):
 )
 def query(query_text: str, config: str):
     """Search the knowledge graph with a natural language query."""
-    console.print("[yellow]query command not yet implemented (M4)[/yellow]")
+    import asyncio
+    from deepdoc.graph.client import create_graphiti_client, close_graphiti_client
+
+    try:
+        cfg = load_config(config)
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1)
+
+    async def _query():
+        graphiti = await create_graphiti_client(cfg)
+        results = await graphiti.search(query_text)
+        await close_graphiti_client(graphiti)
+        return results
+
+    results = asyncio.run(_query())
+
+    if not results:
+        console.print("[yellow]No results found.[/yellow]")
+        return
+
+    console.print(f"\n[bold]{len(results)} results:[/bold]")
+    for r in results:
+        console.print(f"  • {r.fact}")
 
 
 @main.command()
@@ -96,7 +119,15 @@ def query(query_text: str, config: str):
 )
 def verify(doc_path: str, config: str):
     """Verify evidence citations in a document against the graph."""
-    console.print("[yellow]verify command not yet implemented (M4)[/yellow]")
+    try:
+        cfg = load_config(config)
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1)
+
+    from deepdoc.verifier.verifier import run_verify
+
+    run_verify(cfg, doc_path)
 
 
 if __name__ == "__main__":
