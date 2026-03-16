@@ -68,7 +68,9 @@ def generate(config: str, output: str | None):
     if output:
         cfg.output.path = output
 
-    console.print("[yellow]generate command not yet implemented (M2)[/yellow]")
+    from deepdoc.generator.generator import run_generate
+
+    run_generate(cfg)
 
 
 @main.command()
