@@ -1,0 +1,29 @@
+version: "0.1.0"
+
+project:
+  name: my-project
+  path: ./repos/my-project
+  language: typescript
+  framework: nestjs
+
+graph:
+  path: .deepdoc/graph.kuzu
+
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  embedding_provider: openai
+  embedding_model: text-embedding-3-small
+
+scan:
+  include:
+    - "src/**/*.ts"
+  exclude:
+    - "**/*.e2e.spec.ts"
+    - "**/node_modules/**"
+    - "**/dist/**"
+
+output:
+  path: ./docs
+  format: updoc
+  language: ko

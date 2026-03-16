@@ -1,0 +1,41 @@
+[project]
+name = "deepdoc"
+version = "0.1.0"
+description = "Code knowledge graph → accurate documentation"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+readme = "README.md"
+
+dependencies = [
+    "graphiti-core[kuzu,anthropic]>=0.28.0",
+    "click>=8.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "rich>=13.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+deepdoc = "deepdoc.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/deepdoc"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
