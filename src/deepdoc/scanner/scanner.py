@@ -68,7 +68,7 @@ async def scan(config: DeepDocConfig) -> dict:
                     task, description=f"[dim]{episode.name}[/dim]"
                 )
 
-                from graphiti_core.utils import EpisodeType
+                from graphiti_core.nodes import EpisodeType
 
                 await graphiti.add_episode(
                     name=episode.name,

@@ -8,10 +8,10 @@ import yaml
 
 @dataclass
 class LLMConfig:
-    provider: str = "anthropic"
-    model: str = "claude-sonnet-4-20250514"
-    embedding_provider: str = "openai"
-    embedding_model: str = "text-embedding-3-small"
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    embedding_provider: str = "local"
+    embedding_model: str = "jinaai/jina-embeddings-v2-base-code"
 
 
 @dataclass
