@@ -1,5 +1,7 @@
 <div align="center">
 
+[English](README.md) | [한국어](README.ko.md)
+
 # deepdoc
 
 **Code knowledge graph → accurate documentation.**
