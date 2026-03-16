@@ -78,6 +78,7 @@ async def scan(config: DeepDocConfig) -> dict:
                     reference_time=datetime.now(timezone.utc),
                     entity_types=episode.entity_types,
                     edge_types=episode.edge_types,
+                    custom_extraction_instructions=episode.extraction_instructions,
                 )
             except Exception as e:
                 errors += 1

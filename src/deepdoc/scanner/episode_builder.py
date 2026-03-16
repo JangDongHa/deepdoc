@@ -18,6 +18,7 @@ class Episode:
     source_description: str
     entity_types: dict
     edge_types: dict
+    extraction_instructions: str | None = None
 
 
 # Map FileType to the primary EntityType expected in that file
@@ -134,6 +135,57 @@ def _build_module_context(
     return ""
 
 
+NESTJS_MODULE_INSTRUCTIONS = """\
+Extract these relationships with precision:
+1. IMPORTS: modules listed in @Module({ imports: [...] }) — these are imported dependencies
+2. ROUTER REGISTRATION: modules listed inside RouterModule.register([{ children: [...] }]) — ONLY these are registered as route handlers. This is DIFFERENT from imports. A module can be imported but NOT registered in the router.
+3. PROVIDERS: services/classes in @Module({ providers: [...] })
+4. CONTROLLERS: classes in @Module({ controllers: [...] })
+5. EXPORTS: classes in @Module({ exports: [...] })
+6. DATABASE CONNECTIONS: TypeOrmModule.forRootAsync with connection name
+
+CRITICAL: Distinguish between "imports a module" and "registers a module in the router". These are separate relationships. Not all imported modules are router children.
+"""
+
+NESTJS_CONTROLLER_INSTRUCTIONS = """\
+Extract these relationships:
+1. ROUTE PREFIX: the string in @Controller('prefix')
+2. HTTP ENDPOINTS: @Get(), @Post(), @Put(), @Delete(), @Patch() with their paths
+3. GUARDS: @UseGuards(...) at class or method level
+4. DECORATORS: @HasPermission(...), custom decorators
+5. INJECTED SERVICES: constructor parameters
+"""
+
+NESTJS_SPEC_INSTRUCTIONS = """\
+Extract ALL validation conditions and business rules:
+1. For each static method that throws exceptions, list EVERY condition in code order
+2. Include the exact error message string for each condition
+3. For each function call (e.g. subDays, addBusinessDaysWithHolidays), note the exact function name — do NOT confuse calendar-day functions with business-day functions
+4. List ALL items exhaustively — do not summarize or merge similar conditions
+"""
+
+NESTJS_SERVICE_INSTRUCTIONS = """\
+Extract:
+1. INJECTED dependencies (constructor parameters)
+2. CALLS to other services/repositories
+3. TRANSACTION usage (@Transactional decorator)
+4. QUEUE operations (Bull queue dispatch)
+5. Business logic flow for key methods
+"""
+
+
+def _get_extraction_instructions(file_type: FileType) -> str | None:
+    """Get framework-specific extraction instructions by file type."""
+    instructions_map = {
+        FileType.MODULE: NESTJS_MODULE_INSTRUCTIONS,
+        FileType.ROOT_MODULE: NESTJS_MODULE_INSTRUCTIONS,
+        FileType.CONTROLLER: NESTJS_CONTROLLER_INSTRUCTIONS,
+        FileType.SPEC: NESTJS_SPEC_INSTRUCTIONS,
+        FileType.SERVICE: NESTJS_SERVICE_INSTRUCTIONS,
+    }
+    return instructions_map.get(file_type)
+
+
 def build_episode(
     classified: ClassifiedFile,
     project_root: str,
@@ -175,6 +227,9 @@ def build_episode(
     for et in edge_types:
         edge_hints[et.value] = CodeRelationship
 
+    # Build extraction instructions based on file type
+    instructions = _get_extraction_instructions(classified.file_type)
+
     return Episode(
         name=f"file:{classified.relative_path}",
         body=body,
@@ -183,4 +238,5 @@ def build_episode(
         ),
         entity_types=entity_hints,
         edge_types=edge_hints,
+        extraction_instructions=instructions,
     )
