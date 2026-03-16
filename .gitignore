@@ -4,7 +4,8 @@ __pycache__/
 dist/
 build/
 .deepdoc/
-*.kuzu/
+.deepdoc_old*/
+*.kuzu
 .env
 .venv/
 venv/
