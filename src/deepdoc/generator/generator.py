@@ -1,14 +1,11 @@
 """Documentation generator — queries the graph and produces updoc-compatible markdown."""
 
-import asyncio
-import os
 from datetime import date
 from pathlib import Path
 
 from rich.console import Console
 
 from deepdoc.config import DeepDocConfig
-from deepdoc.graph.client import create_graphiti_client, close_graphiti_client
 from deepdoc.graph.queries import run_all_queries
 from deepdoc.generator.updoc_compat import ensure_docs_structure, write_updoc_file
 
@@ -45,7 +42,7 @@ def _format_facts_as_markdown(facts: list[str], header: str = "") -> str:
     return "\n".join(lines)
 
 
-async def generate(config: DeepDocConfig) -> dict:
+def generate(config: DeepDocConfig) -> dict:
     """Generate documentation from the knowledge graph.
 
     Returns a summary dict with generated file count.
@@ -53,6 +50,7 @@ async def generate(config: DeepDocConfig) -> dict:
     project_name = config.project.name
     project_path = config.project.path
     output_path = config.output.path
+    graph_path = config.graph.path
     head = _get_git_head(project_path)
     today = date.today().isoformat()
 
@@ -61,14 +59,16 @@ async def generate(config: DeepDocConfig) -> dict:
     # Ensure directory structure
     ensure_docs_structure(output_path, project_name)
 
-    # Connect to graph and run queries
-    console.print("  Querying knowledge graph...")
-    graphiti = await create_graphiti_client(config)
-    query_results = await run_all_queries(graphiti)
-    await close_graphiti_client(graphiti)
+    # Query ALL facts from graph (no semantic search — direct Kuzu query)
+    console.print("  Querying knowledge graph (direct)...")
+    query_results = run_all_queries(graph_path)
 
     total_facts = sum(len(qr.facts) for qr in query_results.values())
-    console.print(f"  Retrieved [cyan]{total_facts}[/cyan] facts from graph")
+    console.print(f"  Retrieved [cyan]{total_facts}[/cyan] categorized facts")
+
+    for section, qr in sorted(query_results.items()):
+        if qr.facts:
+            console.print(f"    {section}: {len(qr.facts)}")
 
     # Generate project docs (4 files)
     base = Path(output_path)
@@ -77,86 +77,100 @@ async def generate(config: DeepDocConfig) -> dict:
     files_created = []
 
     # --- overview.md ---
-    routing = query_results.get("routing")
     overview_parts = []
-    if routing:
+    routing = query_results.get("routing")
+    if routing and routing.facts:
         overview_parts.append(_format_facts_as_markdown(routing.facts, "라우팅 구조"))
     db = query_results.get("database")
-    if db:
+    if db and db.facts:
         overview_parts.append(_format_facts_as_markdown(db.facts, "데이터베이스"))
     queues = query_results.get("queues")
-    if queues:
+    if queues and queues.facts:
         overview_parts.append(_format_facts_as_markdown(queues.facts, "큐/백그라운드"))
 
     write_updoc_file(
         str(proj_dir / "overview.md"),
         {"project": project_name, "synced_from": head, "synced_at": today},
         f"# {project_name}",
-        "\n\n".join(overview_parts),
-        ["## Sections", "", "- [Architecture](architecture.md)", "- [Configuration](configuration.md)", "- [Dependencies](dependencies.md)"],
+        "\n\n".join(overview_parts) if overview_parts else f"*{project_name} overview — run deepdoc scan first.*",
+        [
+            "## Sections",
+            "",
+            "- [Architecture](architecture.md)",
+            "- [Configuration](configuration.md)",
+            "- [Dependencies](dependencies.md)",
+        ],
     )
     files_created.append(f"docs/projects/{project_name}/overview.md")
 
     # --- architecture.md ---
     arch_parts = []
-    if routing:
-        arch_parts.append(_format_facts_as_markdown(routing.facts, "라우팅 구조"))
-    controllers = query_results.get("controllers")
-    if controllers:
-        arch_parts.append(_format_facts_as_markdown(controllers.facts, "컨트롤러 & 엔드포인트"))
+    modules = query_results.get("modules")
+    if modules and modules.facts:
+        arch_parts.append(_format_facts_as_markdown(modules.facts, "모듈 구조"))
+    if routing and routing.facts:
+        arch_parts.append(_format_facts_as_markdown(routing.facts, "라우팅"))
 
     write_updoc_file(
         str(proj_dir / "architecture.md"),
         {"project": project_name},
         f"# {project_name} — Architecture",
-        "\n\n".join(arch_parts),
+        "\n\n".join(arch_parts) if arch_parts else "*No architecture data.*",
     )
     files_created.append(f"docs/projects/{project_name}/architecture.md")
 
     # --- configuration.md ---
-    cfg = query_results.get("configuration")
+    cfg_section = query_results.get("configuration")
     write_updoc_file(
         str(proj_dir / "configuration.md"),
         {"project": project_name},
         f"# {project_name} — Configuration",
-        _format_facts_as_markdown(cfg.facts if cfg else [], "설정"),
+        _format_facts_as_markdown(cfg_section.facts if cfg_section else [], "설정"),
     )
     files_created.append(f"docs/projects/{project_name}/configuration.md")
 
     # --- dependencies.md ---
     deps = query_results.get("dependencies")
+    db_facts = db.facts if db else []
+    all_dep_facts = (deps.facts if deps else []) + db_facts
     write_updoc_file(
         str(proj_dir / "dependencies.md"),
         {"project": project_name},
         f"# {project_name} — Dependencies",
-        _format_facts_as_markdown(deps.facts if deps else [], "의존성"),
+        _format_facts_as_markdown(all_dep_facts, "의존성 & 데이터베이스"),
     )
     files_created.append(f"docs/projects/{project_name}/dependencies.md")
 
     # --- wiki/index.md ---
     wiki_overview = []
-    if routing:
-        wiki_overview.append(_format_facts_as_markdown(routing.facts[:5], "서비스 개요"))
+    if modules and modules.facts:
+        wiki_overview.append(_format_facts_as_markdown(modules.facts[:10], "서비스 개요"))
     write_updoc_file(
         str(wiki_dir / "index.md"),
         {"project": project_name},
         f"# {project_name} — Wiki",
-        "\n\n".join(wiki_overview),
-        ["## Pages", "", "- [Features](features.md)", "- [Access](access.md)", "- [Policies](policies.md)"],
+        "\n\n".join(wiki_overview) if wiki_overview else "*Run deepdoc scan + generate.*",
+        [
+            "## Pages",
+            "",
+            "- [Features](features.md)",
+            "- [Access](access.md)",
+            "- [Policies](policies.md)",
+        ],
     )
     files_created.append(f"docs/wiki/{project_name}/index.md")
 
     # --- wiki/features.md ---
     features_parts = []
-    if controllers:
-        features_parts.append(_format_facts_as_markdown(controllers.facts, "기능"))
-    if queues:
+    if routing and routing.facts:
+        features_parts.append(_format_facts_as_markdown(routing.facts, "엔드포인트"))
+    if queues and queues.facts:
         features_parts.append(_format_facts_as_markdown(queues.facts, "백그라운드 처리"))
     write_updoc_file(
         str(wiki_dir / "features.md"),
         {"project": project_name},
         f"# {project_name} — Features",
-        "\n\n".join(features_parts),
+        "\n\n".join(features_parts) if features_parts else "*No feature data.*",
     )
     files_created.append(f"docs/wiki/{project_name}/features.md")
 
@@ -190,7 +204,7 @@ async def generate(config: DeepDocConfig) -> dict:
     write_updoc_file(
         str(base / "index.md"),
         {},
-        f"# Documentation",
+        "# Documentation",
         index_content,
         ["[Missions](missions/)"],
     )
@@ -206,4 +220,4 @@ async def generate(config: DeepDocConfig) -> dict:
 
 def run_generate(config: DeepDocConfig) -> dict:
     """Synchronous wrapper for generate()."""
-    return asyncio.run(generate(config))
+    return generate(config)

@@ -1,10 +1,18 @@
-"""Predefined graph queries for documentation generation.
+"""Graph queries for documentation generation.
 
-Each query corresponds to a documentation section and returns
-structured data that the generator renders into markdown.
+Uses direct Kuzu queries to get ALL facts from the graph,
+then categorizes them by documentation section.
+No more semantic search dependency — works across all projects.
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+
+import kuzu
+
+from deepdoc.graph.kuzu_patch import patch_kuzu_fts
+
+patch_kuzu_fts()
 
 
 @dataclass
@@ -12,154 +20,136 @@ class QueryResult:
     """Result from a graph query with evidence."""
 
     section: str
-    facts: list[str]
-    raw_results: list[dict] | None = None
+    facts: list[str] = field(default_factory=list)
 
 
-async def query_all_facts(graphiti) -> list[str]:
-    """Get all facts (edges) from the graph."""
-    results = await graphiti.search(
-        "list all modules, controllers, services, routes, and relationships",
+# Keywords for categorizing facts into documentation sections
+CATEGORY_PATTERNS: dict[str, list[str]] = {
+    "routing": [
+        r"route", r"router", r"prefix", r"endpoint",
+        r"global.?prefix", r"@Controller", r"GET|POST|PUT|DELETE|PATCH",
+        r"registers.*child", r"registers.*route",
+    ],
+    "database": [
+        r"database", r"TypeOrm", r"connection", r"repository",
+        r"entity", r"replication", r"master", r"slave",
+    ],
+    "auth": [
+        r"guard", r"auth", r"jwt", r"token", r"login",
+        r"permission", r"api.?key", r"cookie", r"Bearer",
+        r"password", r"social.?login", r"guest.?login",
+    ],
+    "business_rules": [
+        r"exception", r"thrown", r"throw", r"assert",
+        r"valid", r"expired", r"condition", r"check",
+        r"status", r"spec", r"rule", r"usable",
+        r"if.*then", r"must", r"require",
+    ],
+    "queues": [
+        r"queue", r"bull", r"job", r"process",
+        r"background", r"async",
+    ],
+    "configuration": [
+        r"config", r"port", r"timeout", r"limit",
+        r"secret", r"env", r"constant", r"setting",
+        r"url", r"prefix.*path",
+    ],
+    "modules": [
+        r"module", r"import", r"export", r"provide",
+        r"controller", r"service",
+    ],
+    "dependencies": [
+        r"package", r"version", r"dependency", r"library",
+        r"npm", r"install",
+    ],
+}
+
+
+def _categorize_fact(fact: str) -> list[str]:
+    """Categorize a fact into one or more documentation sections."""
+    categories = []
+    fact_lower = fact.lower()
+    for category, patterns in CATEGORY_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, fact_lower):
+                categories.append(category)
+                break
+    return categories if categories else ["other"]
+
+
+def get_all_facts_from_graph(graph_path: str) -> list[tuple[str, str, str]]:
+    """Get ALL facts (edges) from the Kuzu graph via direct query.
+
+    Returns list of (source_name, fact, target_name) tuples.
+    """
+    from graphiti_core.driver.kuzu_driver import KuzuDriver
+
+    driver = KuzuDriver(db=graph_path)
+    conn = kuzu.Connection(driver.db)
+
+    facts = []
+
+    # Get all edges via RelatesToNode_ (Kuzu's edge representation)
+    result = conn.execute(
+        "MATCH (n:Entity)-[:RELATES_TO]->(r:RelatesToNode_)-[:RELATES_TO]->(m:Entity) "
+        "RETURN n.name, r.fact, m.name"
     )
-    return [r.fact for r in results]
+    while result.has_next():
+        row = result.get_next()
+        facts.append((row[0], row[1], row[2]))
+
+    conn.close()
+    return facts
 
 
-async def query_routing_structure(graphiti) -> QueryResult:
-    """Query which modules are registered in which routes."""
-    results = await graphiti.search(
-        "RouterModule registers modules as child routes"
+def get_all_nodes_from_graph(graph_path: str) -> list[dict]:
+    """Get ALL entity nodes from the graph."""
+    from graphiti_core.driver.kuzu_driver import KuzuDriver
+
+    driver = KuzuDriver(db=graph_path)
+    conn = kuzu.Connection(driver.db)
+
+    nodes = []
+    result = conn.execute(
+        "MATCH (n:Entity) RETURN n.name, n.summary, n.labels"
     )
-    facts = [r.fact for r in results]
+    while result.has_next():
+        row = result.get_next()
+        nodes.append({
+            "name": row[0],
+            "summary": row[1] or "",
+            "labels": row[2] or [],
+        })
 
-    # Also search for modules that are NOT in the router
-    import_results = await graphiti.search(
-        "module imports another module"
-    )
-    import_facts = [r.fact for r in import_results]
-
-    return QueryResult(
-        section="routing",
-        facts=facts + import_facts,
-    )
+    conn.close()
+    return nodes
 
 
-async def query_database_connections(graphiti) -> QueryResult:
-    """Query database connections and their entities."""
-    results = await graphiti.search(
-        "TypeOrmModule database connection name entities"
-    )
-    return QueryResult(
-        section="database",
-        facts=[r.fact for r in results],
-    )
+def run_all_queries(graph_path: str) -> dict[str, QueryResult]:
+    """Get all facts from graph and categorize into documentation sections.
 
+    This replaces the old semantic-search approach.
+    Works across ALL projects without project-specific keywords.
+    """
+    raw_facts = get_all_facts_from_graph(graph_path)
 
-async def query_controllers_and_routes(graphiti) -> QueryResult:
-    """Query all controllers and their HTTP endpoints."""
-    results = await graphiti.search(
-        "controller defines route endpoint HTTP GET POST"
-    )
-    return QueryResult(
-        section="controllers",
-        facts=[r.fact for r in results],
-    )
-
-
-async def query_guards_and_auth(graphiti) -> QueryResult:
-    """Query authentication guards and permission checks."""
-    queries = [
-        "guard authentication JWT permission authorization",
-        "JwtAuthGuard Bearer token validate",
-        "cookie httpOnly access_token refresh_token",
-        "API key x-api-key header",
-    ]
-    all_facts = []
+    # Deduplicate facts
     seen = set()
-    for q in queries:
-        results = await graphiti.search(q)
-        for r in results:
-            if r.fact not in seen:
-                seen.add(r.fact)
-                all_facts.append(r.fact)
-    return QueryResult(
-        section="auth",
-        facts=all_facts,
-    )
+    unique_facts = []
+    for source, fact, target in raw_facts:
+        if fact not in seen:
+            seen.add(fact)
+            unique_facts.append(fact)
 
+    # Categorize
+    results: dict[str, QueryResult] = {}
+    for section in CATEGORY_PATTERNS:
+        results[section] = QueryResult(section=section)
 
-async def query_business_rules(graphiti) -> QueryResult:
-    """Query business rules and validation conditions."""
-    queries = [
-        "NotAbleExtendPartnerTicketException thrown validation condition",
-        "PartnerTicket extension status USING subDays",
-        "exception thrown if condition not met",
-        "business rule validation assert check",
-    ]
-    all_facts = []
-    seen = set()
-    for q in queries:
-        results = await graphiti.search(q)
-        for r in results:
-            if r.fact not in seen:
-                seen.add(r.fact)
-                all_facts.append(r.fact)
-    return QueryResult(
-        section="business_rules",
-        facts=all_facts,
-    )
-
-
-async def query_dependencies(graphiti) -> QueryResult:
-    """Query external packages and internal module dependencies."""
-    results = await graphiti.search(
-        "package dependency import external library"
-    )
-    return QueryResult(
-        section="dependencies",
-        facts=[r.fact for r in results],
-    )
-
-
-async def query_queues_and_jobs(graphiti) -> QueryResult:
-    """Query Bull queues and background job processing."""
-    results = await graphiti.search(
-        "Bull queue job processing background"
-    )
-    return QueryResult(
-        section="queues",
-        facts=[r.fact for r in results],
-    )
-
-
-async def query_configuration(graphiti) -> QueryResult:
-    """Query configuration, environment variables, and constants."""
-    results = await graphiti.search(
-        "configuration environment variable constant port timeout limit"
-    )
-    return QueryResult(
-        section="configuration",
-        facts=[r.fact for r in results],
-    )
-
-
-async def run_all_queries(graphiti) -> dict[str, QueryResult]:
-    """Run all documentation queries and return results by section."""
-    queries = {
-        "routing": query_routing_structure,
-        "database": query_database_connections,
-        "controllers": query_controllers_and_routes,
-        "auth": query_guards_and_auth,
-        "business_rules": query_business_rules,
-        "dependencies": query_dependencies,
-        "queues": query_queues_and_jobs,
-        "configuration": query_configuration,
-    }
-
-    results = {}
-    for name, query_fn in queries.items():
-        try:
-            results[name] = await query_fn(graphiti)
-        except Exception as e:
-            results[name] = QueryResult(section=name, facts=[f"Query error: {e}"])
+    for fact in unique_facts:
+        categories = _categorize_fact(fact)
+        for cat in categories:
+            if cat in results:
+                results[cat].facts.append(fact)
 
     return results

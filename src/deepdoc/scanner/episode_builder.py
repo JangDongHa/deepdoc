@@ -162,6 +162,8 @@ Extract ALL validation conditions and business rules:
 2. Include the exact error message string for each condition
 3. For each function call (e.g. subDays, addBusinessDaysWithHolidays), note the exact function name — do NOT confuse calendar-day functions with business-day functions
 4. List ALL items exhaustively — do not summarize or merge similar conditions
+5. For numeric constants and arithmetic expressions (e.g. 60 * 60 * 24 * 30 * 3), compute the actual value and state it in human-readable form (e.g. "90 days"). Always note the unit (seconds, minutes, days, etc.)
+6. For date calculations (e.g. addDays(date, 14)), explicitly state whether it uses calendar days or business days based on the function name
 """
 
 NESTJS_SERVICE_INSTRUCTIONS = """\
@@ -171,6 +173,8 @@ Extract:
 3. TRANSACTION usage (@Transactional decorator)
 4. QUEUE operations (Bull queue dispatch)
 5. Business logic flow for key methods
+6. For numeric constants and arithmetic expressions, compute the actual value and state it clearly (e.g. "60 * 60 * 24 * 30 * 3 = 7,776,000 seconds = 90 days")
+7. Token/session expiry durations — state the exact duration in human-readable form
 """
 
 
