@@ -271,7 +271,9 @@ Parses `<!-- evidence: file:function snippet -->` comments and checks each again
 
 ## Verified Results
 
-Tested on a real-world NestJS project (modu-api-partner, 200+ files):
+Tested on two real-world NestJS projects:
+
+### modu-api-partner (200+ files, 67 scanned)
 
 | Metric | LLM-only (updoc) | deepdoc |
 |--------|-------------------|---------|
@@ -281,12 +283,31 @@ Tested on a real-world NestJS project (modu-api-partner, 200+ files):
 | Unimplemented spec features | Included (from memory/specs) | **Excluded (code-only source)** |
 | `/partner` route modules | 18 (counted controller files) | **10/11 (counted router registrations)** |
 
+### modu-api-user (190+ files, 54 scanned)
+
+| Metric | Expected (code audit) | deepdoc |
+|--------|----------------------|---------|
+| RouterModule.register | Not used (global prefix only) | **Correctly absent — no false RouterModule facts** |
+| AuthCodeSpec 3min expiry | `addMinutes(now, 3)` | **"adding 3 minutes to the current time"** |
+| UserSpec status exceptions (3) | BLOCK→Black, DORMANT→Dormant, UNREGISTER→Unregister | **All 3 extracted** |
+| Referral 14 calendar days | `addDays(joinDate, 14)` | **"14 days after the user's join date"** |
+| DiscountCoupon validation | publication dates + static/dynamic | **All conditions extracted** |
+| Total business rules in policies.md | 13 spec classes | **72 facts** (comprehensive) |
+
+### Query approach evolution
+
+| Version | Approach | modu-api-user facts |
+|---------|----------|---------------------|
+| v1 | Semantic search with hardcoded keywords | 15 |
+| v2 | Direct graph traversal + pattern categorization | **544** |
+
 ## Known Limitations
 
 - **Scan speed**: ~30 seconds per file (4-10 LLM calls per episode via Graphiti). A 200-file project takes ~30 minutes. Future: replace structural extraction with AST parsing, use LLM only for semantic understanding.
 - **Large files**: Files over 20KB (e.g., `app.module.ts` at 24KB) may have extraction gaps. The LLM can miss items in long lists. Future: episode chunking.
 - **NestJS only**: Currently targets NestJS/TypeScript projects. The `scanner/frameworks/` directory is designed for extension (Spring, FastAPI, etc.) but only `nestjs.py` is implemented.
 - **Kuzu FTS bug**: graphiti-core's Kuzu driver doesn't create FTS indexes. deepdoc includes a monkey-patch (`kuzu_patch.py`) that adds them.
+- **Arithmetic constants**: Expressions like `60 * 60 * 24 * 30 * 3` (90 days) are not always computed by the LLM. Improved extraction instructions address this for new scans.
 
 ## Roadmap
 

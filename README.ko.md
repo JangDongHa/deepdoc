@@ -271,15 +271,35 @@ deepdoc verify docs/wiki/my-api/policies.md
 
 ## 검증 결과
 
-실제 NestJS 프로젝트(modu-api-partner, 200+ 파일)로 테스트한 결과:
+실제 NestJS 프로젝트 2개로 테스트한 결과:
+
+### modu-api-partner (200+ 파일, 67개 스캔)
 
 | 항목 | LLM 단독 (updoc) | deepdoc |
 |------|-------------------|---------|
-| ext 라우팅 모듈 | 5개 (오류 — 디렉토리 수 카운트) | **3개 (정확 — 등록 수 카운트)** |
+| ext 라우팅 모듈 | 5개 (오류 — 디렉토리 수) | **3개 (정확 — 등록 수)** |
 | 주차권 연장 조건 | 3/5개 (2개 탈락) | **5/5개 (전부 추출)** |
-| `subDays` vs `subBusinessDays` | 혼동 ("12영업일"로 기술) | **그래프에서 별도 fact** |
-| 미구현 스펙 기능 | 포함 (메모리/스펙에서 유입) | **제외 (코드만 소스)** |
-| `/partner` 라우트 모듈 | 18개 (컨트롤러 파일 수 카운트) | **10/11개 (라우터 등록 수 카운트)** |
+| `subDays` vs `subBusinessDays` | 혼동 ("12영업일") | **그래프에서 별도 fact** |
+| 미구현 스펙 기능 | 포함 (메모리/스펙 유입) | **제외 (코드만 소스)** |
+| `/partner` 라우트 모듈 | 18개 (파일 수) | **10/11개 (등록 수)** |
+
+### modu-api-user (190+ 파일, 54개 스캔)
+
+| 항목 | 기대값 (코드 감사) | deepdoc |
+|------|-------------------|---------|
+| RouterModule.register | 사용 안 함 (글로벌 prefix만) | **정확 — 가짜 RouterModule fact 없음** |
+| AuthCodeSpec 3분 만료 | `addMinutes(now, 3)` | **"adding 3 minutes"** |
+| UserSpec 상태별 예외 (3종) | BLOCK→Black, DORMANT→Dormant, UNREGISTER→Unregister | **3종 전부 추출** |
+| Referral 14 캘린더일 | `addDays(joinDate, 14)` | **"14 days after join date"** |
+| 쿠폰 유효성 조건 | publication dates + static/dynamic | **전부 추출** |
+| policies.md 비즈니스 규칙 | 13개 spec 클래스 | **72개 fact** |
+
+### 쿼리 방식 개선 이력
+
+| 버전 | 방식 | modu-api-user facts |
+|------|------|---------------------|
+| v1 | 하드코딩 키워드 시맨틱 검색 | 15 |
+| v2 | 직접 그래프 순회 + 패턴 분류 | **544** |
 
 ## 알려진 제한사항
 
@@ -287,6 +307,7 @@ deepdoc verify docs/wiki/my-api/policies.md
 - **대용량 파일**: 20KB 이상 파일(예: 24KB `app.module.ts`)은 추출 누락 가능. LLM이 긴 목록에서 항목을 놓칠 수 있음. 향후: 에피소드 분할.
 - **NestJS 한정**: 현재 NestJS/TypeScript 프로젝트만 지원. `scanner/frameworks/` 디렉토리가 확장 가능하게 설계되어 있지만(Spring, FastAPI 등) `nestjs.py`만 구현됨.
 - **Kuzu FTS 버그**: graphiti-core의 Kuzu 드라이버가 FTS 인덱스를 생성하지 않음. deepdoc이 몽키패치(`kuzu_patch.py`)로 추가.
+- **산술 상수**: `60 * 60 * 24 * 30 * 3`(90일) 같은 산술식을 LLM이 항상 계산하지는 않음. 개선된 extraction instruction으로 새 스캔 시 반영.
 
 ## 로드맵
 
